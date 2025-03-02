@@ -15,6 +15,7 @@ const xss = require("xss-clean");
 const socketIo = require("socket.io");
 require("dotenv").config();
 
+// Existing setup
 console.log("Hello! Backend server is starting...");
 
 const app = express();
@@ -100,6 +101,17 @@ app.use(limiter);
 // Define routes
 app.use("/api", userRoutes);
 app.use("/api/blogs", blogRoutes);
+
+// New route to send notifications to all connected users
+app.post("/send-notification", (req, res) => {
+  const notificationMessage = req.body.message || "Default notification message";
+
+  // Broadcast the notification to all connected users
+  io.emit("notification", notificationMessage);
+
+  // Send a response back to indicate success
+  res.status(200).json({ message: "Notification sent to all users!" });
+});
 
 // Error handling
 app.use((req, res, next) => {
