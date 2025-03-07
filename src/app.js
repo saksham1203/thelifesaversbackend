@@ -26,6 +26,7 @@ const io = socketIo(server, {
       "http://localhost:5173",
       "https://the-life-savers-fronend.vercel.app",
       "https://www.thelifesavers.in",
+      "https://thelifesavers.in"
     ],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"],
