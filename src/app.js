@@ -1,4 +1,4 @@
-// Required imports
+// Existing imports
 const express = require("express");
 const http = require("http");
 const path = require("path");
@@ -15,149 +15,174 @@ const xss = require("xss-clean");
 const socketIo = require("socket.io");
 require("dotenv").config();
 
-// Start message
+// Existing setup
 console.log("Hello! Backend server is starting...");
 
-// Setup app & server
 const app = express();
 const server = http.createServer(app);
-
-// ⚠️ Full list of allowed origins (including Capacitor & your domains)
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost",
-  "capacitor://localhost",
-  "https://the-life-savers-fronend.vercel.app",
-  "https://www.thelifesavers.in",
-  "https://service.thelifesavers.in"
-];
-
-// ⚙️ Setup Socket.io with correct CORS
 const io = socketIo(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: [
+      "http://localhost:5173",
+      "https://the-life-savers-fronend.vercel.app",
+      "https://www.thelifesavers.in",
+    ],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"],
     credentials: true,
   },
 });
 
-// Database Connection
+// Connect to the database
 connectDB();
 
-// Serve static files (public folder)
+// Serve static files from the 'public' directory
 app.use("/public", express.static(path.join(__dirname, "public")));
 
-// Simple health check route
+// Root route
 app.get("/", (req, res) => {
   res.send("Hello! Backend server is running.");
 });
 
-// 🛡️ Security Middleware (Helmet, Sanitizers, etc.)
-app.use(helmet());
-app.use(mongoSanitize());
-app.use(xss());
-
-// Compression for performance
-app.use(compression());
-
-// Body parsers
+// Middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// ✅ Full CORS middleware setup
+// Security Middleware
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "trusted-cdn.com"],
+      },
+    },
+    referrerPolicy: { policy: "no-referrer" },
+    crossOriginEmbedderPolicy: true,
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    dnsPrefetchControl: { allow: false },
+  })
+);
+
+app.use(mongoSanitize());
+app.use(xss());
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://the-life-savers-fronend.vercel.app",
+  "https://www.thelifesavers.in",
+];
+
 app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        console.warn("❌ CORS blocked request from:", origin);
         callback(new Error("Not allowed by CORS"));
       }
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
+    optionsSuccessStatus: 204,
   })
 );
 
-// Allow OPTIONS for preflight
-app.options("*", cors());
+app.use(compression());
 
-// 🛡️ Rate Limiter
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
-    message: "Too many requests from this IP, please try again later.",
-  })
-);
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: "Too many requests from this IP, please try again later.",
+});
+app.use(limiter);
 
-// 🛣️ API Routes
+// Define routes
 app.use("/api", userRoutes);
 app.use("/api/blogs", blogRoutes);
 
-// Notification broadcast route (optional)
+// New route to send notifications to all connected users
 app.post("/send-notification", (req, res) => {
   const notificationMessage = req.body.message || "Default notification message";
+
+  // Broadcast the notification to all connected users
   io.emit("notification", notificationMessage);
+
+  // Send a response back to indicate success
   res.status(200).json({ message: "Notification sent to all users!" });
 });
 
-// 🐛 404 Handler
+// Error handling
 app.use((req, res, next) => {
   const error = new Error("Not Found");
   error.status = 404;
   next(error);
 });
 
-// 🐛 Global Error Handler
 app.use((error, req, res, next) => {
   const statusCode = error.status || 500;
   const message = error.message || "Internal Server Error";
+
   if (process.env.NODE_ENV !== "production") {
     console.error(error.stack);
   }
-  res.status(statusCode).json({ message, status: statusCode });
+
+  res.status(statusCode).json({
+    message,
+    status: statusCode,
+  });
 });
 
-// 💬 WebSockets for Real-time Chat
-let onlineUsers = 0;
+// Socket.IO connection for real-time chat
+let onlineUsers = 0; // Track the number of connected users
 
 io.on("connection", (socket) => {
-  onlineUsers++;
-  console.log("✅ User connected:", socket.id);
+  onlineUsers++; // Increment user count
+  console.log("A user connected:", socket.id);
+
+  // Emit the updated online user count to all connected clients
   io.emit("usersOnline", onlineUsers);
 
+  // Listen for incoming messages
   socket.on("sendMessage", async (messageData) => {
     try {
-      io.emit("receiveMessage", messageData);
-      await chatController.saveMessage(messageData);
+      console.log("Received message data:", messageData);
+      io.emit("receiveMessage", messageData); // Broadcast message to clients
+      await chatController.saveMessage(messageData); // Save message to DB
     } catch (error) {
       console.error("Error saving message:", error);
     }
   });
 
-  socket.on("userTyping", () => socket.broadcast.emit("userTyping"));
-  socket.on("userStoppedTyping", () => socket.broadcast.emit("userStoppedTyping"));
+  // Typing event handling
+  socket.on("userTyping", () => {
+    socket.broadcast.emit("userTyping"); // Notify other users that someone is typing
+  });
 
+  socket.on("userStoppedTyping", () => {
+    socket.broadcast.emit("userStoppedTyping"); // Notify others that typing has stopped
+  });
+
+  // Handle disconnection
   socket.on("disconnect", () => {
-    onlineUsers--;
-    console.log("❌ User disconnected:", socket.id);
+    onlineUsers--; // Decrement user count
+    console.log("User disconnected:", socket.id);
+
+    // Emit the updated online user count to all connected clients
     io.emit("usersOnline", onlineUsers);
   });
 });
 
-// 💥 Graceful Shutdown
+// Graceful shutdown
 process.on("SIGTERM", () => {
-  console.log("SIGTERM received: closing HTTP server");
+  console.log("SIGTERM signal received: closing HTTP server");
   server.close(() => {
     console.log("HTTP server closed");
   });
 });
 
-// 🚀 Start Server
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`✅ Server started on port ${PORT}`);
+// Start the server
+server.listen(process.env.PORT || 5000, () => {
+  console.log(`Server started on port ${process.env.PORT || 5000}`);
 });
