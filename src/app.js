@@ -14,6 +14,7 @@ const mongoSanitize = require("express-mongo-sanitize");
 const xss = require("xss-clean");
 const socketIo = require("socket.io");
 require("dotenv").config();
+const notificationRoutes = require("./routes/notificationRoutes");
 
 // Existing setup
 console.log("Hello! Backend server is starting...");
@@ -98,13 +99,15 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
+app.use("/api/notifications", notificationRoutes);
 // Define routes
 app.use("/api", userRoutes);
 app.use("/api/blogs", blogRoutes);
 
 // New route to send notifications to all connected users
 app.post("/send-notification", (req, res) => {
-  const notificationMessage = req.body.message || "Default notification message";
+  const notificationMessage =
+    req.body.message || "Default notification message";
 
   // Broadcast the notification to all connected users
   io.emit("notification", notificationMessage);
