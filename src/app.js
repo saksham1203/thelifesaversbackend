@@ -23,11 +23,9 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://the-life-savers-fronend.vercel.app",
-      "https://www.thelifesavers.in",
-    ],
+    origin: (origin, callback) => {
+      callback(null, origin); // Dynamically allow all origins
+    },
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type"],
     credentials: true,
@@ -68,23 +66,14 @@ app.use(
 app.use(mongoSanitize());
 app.use(xss());
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://the-life-savers-fronend.vercel.app",
-  "https://www.thelifesavers.in",
-];
-
+// CORS - Allow all origins (dynamically)
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
+      callback(null, origin); // Reflect the request origin
     },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     optionsSuccessStatus: 204,
   })
 );
@@ -99,20 +88,15 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
+// Routes
 app.use("/api/notifications", notificationRoutes);
-// Define routes
 app.use("/api", userRoutes);
 app.use("/api/blogs", blogRoutes);
 
 // New route to send notifications to all connected users
 app.post("/send-notification", (req, res) => {
-  const notificationMessage =
-    req.body.message || "Default notification message";
-
-  // Broadcast the notification to all connected users
+  const notificationMessage = req.body.message || "Default notification message";
   io.emit("notification", notificationMessage);
-
-  // Send a response back to indicate success
   res.status(200).json({ message: "Notification sent to all users!" });
 });
 
@@ -126,53 +110,41 @@ app.use((req, res, next) => {
 app.use((error, req, res, next) => {
   const statusCode = error.status || 500;
   const message = error.message || "Internal Server Error";
-
   if (process.env.NODE_ENV !== "production") {
     console.error(error.stack);
   }
-
-  res.status(statusCode).json({
-    message,
-    status: statusCode,
-  });
+  res.status(statusCode).json({ message, status: statusCode });
 });
 
 // Socket.IO connection for real-time chat
-let onlineUsers = 0; // Track the number of connected users
+let onlineUsers = 0;
 
 io.on("connection", (socket) => {
-  onlineUsers++; // Increment user count
+  onlineUsers++;
   console.log("A user connected:", socket.id);
-
-  // Emit the updated online user count to all connected clients
   io.emit("usersOnline", onlineUsers);
 
-  // Listen for incoming messages
   socket.on("sendMessage", async (messageData) => {
     try {
       console.log("Received message data:", messageData);
-      io.emit("receiveMessage", messageData); // Broadcast message to clients
-      await chatController.saveMessage(messageData); // Save message to DB
+      io.emit("receiveMessage", messageData);
+      await chatController.saveMessage(messageData);
     } catch (error) {
       console.error("Error saving message:", error);
     }
   });
 
-  // Typing event handling
   socket.on("userTyping", () => {
-    socket.broadcast.emit("userTyping"); // Notify other users that someone is typing
+    socket.broadcast.emit("userTyping");
   });
 
   socket.on("userStoppedTyping", () => {
-    socket.broadcast.emit("userStoppedTyping"); // Notify others that typing has stopped
+    socket.broadcast.emit("userStoppedTyping");
   });
 
-  // Handle disconnection
   socket.on("disconnect", () => {
-    onlineUsers--; // Decrement user count
+    onlineUsers--;
     console.log("User disconnected:", socket.id);
-
-    // Emit the updated online user count to all connected clients
     io.emit("usersOnline", onlineUsers);
   });
 });
